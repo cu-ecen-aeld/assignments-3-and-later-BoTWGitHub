@@ -18,11 +18,7 @@ fi
 
 writefile=$1
 writestr=$2
-filesdir=$(dirname $writefile)
-if [ ! -d filesdir ]
-then
-    mkdir -p $filesdir
-fi
+mkdir -p $(dirname $writefile)
 
 touch $writefile
 if [ ! -f $writefile ]
