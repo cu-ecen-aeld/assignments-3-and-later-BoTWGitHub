@@ -11,13 +11,23 @@ int main(int argc, char* argv[])
         return 1;
     }
 
-    syslog(LOG_DEBUG, "Writing %s to %s", argv[2], argv[1]);
-    fp = fopen(argv[1], "w");
+    const char *writefile = argv[1];
+    const char *writestr  = argv[2];
+    syslog(LOG_DEBUG, "Writing %s to %s", writestr, writefile);
+
+    fp = fopen(writefile, "w");
     if(fp == NULL){
-        syslog(LOG_ERR, "fopen %s failed", argv[1]);
+        syslog(LOG_ERR, "fopen %s failed", writefile);
+        return 1;
     }
-    fprintf(fp, "%s\n", argv[2]);
+
+    if(fprintf(fp, "%s\n", writestr) < 0){
+        syslog(LOG_ERR, "fprintf %s failed", writestr);
+        return 1;
+    }
+
     fclose(fp);
+    closelog();
 
     return 0;
 }
