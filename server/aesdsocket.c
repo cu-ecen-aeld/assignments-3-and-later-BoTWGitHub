@@ -13,6 +13,7 @@
 #include <sys/wait.h>
 
 #define OUTPUT_FILE "/var/tmp/aesdsocketdata"
+#define PORT        "9000"
 
 bool caught_signal = false;
 
@@ -46,12 +47,6 @@ int main()
 {
     openlog(NULL, 0, LOG_USER);
 
-    int sd = socket(PF_INET, SOCK_STREAM, 0);
-    if(sd == -1) {
-        syslog(LOG_ERR, "socket open failed");
-        return -1;
-    }
-
     struct addrinfo hints;
     struct addrinfo *servinfo;
 
@@ -60,14 +55,22 @@ int main()
     hints.ai_family = AF_UNSPEC;
     hints.ai_socktype = SOCK_STREAM;
 
-    if(getaddrinfo(NULL, "9000", &hints, &servinfo) != 0) {
+    if(getaddrinfo(NULL, PORT, &hints, &servinfo) != 0) {
         syslog(LOG_ERR, "getaddrinfo failed");
+        closelog();
         return -1;
     }
 
-    if(bind(sd, servinfo->ai_addr, sizeof(struct sockaddr)) != 0) {
+    int sd = socket(servinfo->ai_family, servinfo->ai_socktype, servinfo->ai_protocol);
+    if(sd == -1) {
+        syslog(LOG_ERR, "socket open failed");
+        return -1;
+    }
+
+    if(bind(sd, servinfo->ai_addr, servinfo->ai_addrlen) == -1) {
         syslog(LOG_ERR, "bind failed");
         freeaddrinfo(servinfo);
+        close(sd);
         return -1;
     }
     freeaddrinfo(servinfo);
