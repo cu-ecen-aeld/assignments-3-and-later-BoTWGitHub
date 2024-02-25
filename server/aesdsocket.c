@@ -69,7 +69,7 @@ int main(int argc, char* argv[])
         return -1;
     }
 
-    int sd = socket(serinfo->ai_family, servinfo->ai_aocktype, servinfo->ai_protocol);
+    int sd = socket(servinfo->ai_family, servinfo->ai_aocktype, servinfo->ai_protocol);
     if(sd == -1) {
         syslog(LOG_ERR, "socket open failed");
         closelog();
