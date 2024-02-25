@@ -69,7 +69,7 @@ int main(int argc, char* argv[])
         return -1;
     }
 
-    int sd = socket(servinfo->ai_family, servinfo->ai_socktype, servinfo->ai_protocol);
+    int sd = socket(PF_INET, SOCK_STREAM, 0);
     if(sd == -1) {
         syslog(LOG_ERR, "socket open failed");
         closelog();
@@ -82,7 +82,7 @@ int main(int argc, char* argv[])
         return -1;
     }
 
-    if(bind(sd, servinfo->ai_addr, servinfo->ai_addrlen) != 0) {
+    if(bind(sd, servinfo->ai_addr, sizeof(struct sockaddr)) != 0) {
         syslog(LOG_ERR, "bind failed");
         freeaddrinfo(servinfo);
         close(sd);
