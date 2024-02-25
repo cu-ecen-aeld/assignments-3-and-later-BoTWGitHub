@@ -69,7 +69,7 @@ int main(int argc, char* argv[])
         return -1;
     }
 
-    int sd = socket(PF_INET, SOCK_STREAM, 0);
+    int sd = socket(servinfo->ai_family, servinfo->ai_socktype, servinfo->ai_protocol);
     if(sd == -1) {
         syslog(LOG_ERR, "socket open failed");
         closelog();
