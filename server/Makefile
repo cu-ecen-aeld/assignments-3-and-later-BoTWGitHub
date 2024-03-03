@@ -6,7 +6,7 @@ CFLAGS=-g -Wall -Werror
 
 all:
 	$(CC) $(CFLAGS)  -c -o $(OBJS) $(SRC)
-	$(CC) $(CFLAGS) -I/ $(OBJS) -o $(TARGET)
+	$(CC) $(CFLAGS) -I/ $(OBJS) -o $(TARGET) -lpthread
 
 clean:
 	-rm -f *.o $(TARGET) *.elf *.map
