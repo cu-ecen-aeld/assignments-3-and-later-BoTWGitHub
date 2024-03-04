@@ -29,10 +29,12 @@ struct timestamp_data {
 struct thread_data {
     int sockfd;
     pthread_mutex_t *mutex;
+    bool complete;
 };
 
 struct thread_node {
     pthread_t thread;
+    struct thread_data *data;
     LIST_ENTRY(thread_node) node;
 };
 
@@ -72,6 +74,7 @@ void* data_handler(void* thread_param)
     int rc = pthread_mutex_lock(data->mutex);
     if(rc != 0) {
         printf("lock mutex error %d\n", rc);
+        data->complete = true;
         return thread_param;
     }
 
@@ -92,6 +95,7 @@ void* data_handler(void* thread_param)
     int rd = open(OUTPUT_FILE, O_RDONLY);
     if(rd == -1) {
         syslog(LOG_ERR, "file open read failed");
+        data->complete = true;
         return thread_param;
     }
 
@@ -105,6 +109,7 @@ void* data_handler(void* thread_param)
         printf("mutex unlock error %d\n", rc);
     }
 
+    data->complete = true;
     return thread_param;
 }
 
@@ -229,6 +234,7 @@ int main(int argc, char* argv[])
         goto err3;
     }
 
+    struct thread_node *cur, *next;
     while(!caught_signal) {
         struct sockaddr client;
         socklen_t client_len = sizeof(struct sockaddr);
@@ -245,7 +251,9 @@ int main(int argc, char* argv[])
         struct thread_data* data = malloc(sizeof(struct thread_data));
         data->sockfd = sockfd;
         data->mutex = &mutex;
+        data->complete = false;
         struct thread_node* t = malloc(sizeof(struct thread_node));
+        t->data = data;
         int rc = pthread_create(&t->thread, NULL, data_handler, data);
         if(rc != 0) {
             printf("error pthread_create\n");
@@ -253,18 +261,26 @@ int main(int argc, char* argv[])
             break;
         }
         LIST_INSERT_HEAD(&list_head, t, node);
+
+        for(cur=LIST_FIRST(&list_head);cur!=NULL;cur=next) {
+            next = LIST_NEXT(cur, node);
+            if(cur->data->complete) {
+                pthread_join(cur->thread, NULL);
+                close(cur->data->sockfd);
+                free(cur->data);
+                LIST_REMOVE(cur, node);
+                free(cur);
+            }
+        }
     }
 
-    struct thread_node *cur, *next;
+    
     for(cur=LIST_FIRST(&list_head);cur!=NULL;cur=next) {
         next = LIST_NEXT(cur, node);
-        void *ret;
-        pthread_join(cur->thread, &ret);
-        if(ret) {
-            struct thread_data* thread_ret = (struct thread_data *)ret;
-            close(thread_ret->sockfd);
-            free(ret);
-        }
+        pthread_cancel(cur->thread);
+        pthread_join(cur->thread, NULL);
+        close(cur->data->sockfd);
+        free(cur->data);
         free(cur);
     }
 
