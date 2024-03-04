@@ -85,7 +85,13 @@ void* data_handler(void* thread_param)
     }
     int ret_len;
     while((ret_len = recv(data->sockfd, buf, BUF_SIZE, 0)) > 0) {
-        write(wd, buf, ret_len);
+        int len = write(wd, buf, ret_len);
+        if(len == -1) {
+            syslog(LOG_ERR, "write file failed");
+            close(wd);
+            data->complete = true;
+            return thread_param;
+        }
         if(buf[ret_len-1]=='\n') {
             break;
         }
@@ -148,7 +154,10 @@ void* timestamp_handler(void* thread_param)
             return thread_param;
         }
         
-        write(wd, str, strlen(str));
+        int len = write(wd, str, strlen(str));
+        if(len == -1) {
+            syslog(LOG_ERR, "file open create write failed");
+        }
         close(wd);
 
         rc = pthread_mutex_unlock(data->mutex);
