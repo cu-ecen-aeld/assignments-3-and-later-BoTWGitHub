@@ -17,11 +17,12 @@
 #include <linux/types.h>
 #include <linux/cdev.h>
 #include <linux/fs.h> // file_operations
+#include <linux/slab.h>
 #include "aesdchar.h"
 int aesd_major =   0; // use dynamic major
 int aesd_minor =   0;
 
-MODULE_AUTHOR("Your Name Here"); /** TODO: fill in your name **/
+MODULE_AUTHOR("Bo Lin TW"); /** TODO: fill in your name **/
 MODULE_LICENSE("Dual BSD/GPL");
 
 struct aesd_dev aesd_device;
@@ -29,9 +30,9 @@ struct aesd_dev aesd_device;
 int aesd_open(struct inode *inode, struct file *filp)
 {
     PDEBUG("open");
-    /**
-     * TODO: handle open
-     */
+    
+    filp->private_data = (void *)&aesd_device;
+
     return 0;
 }
 
@@ -41,6 +42,7 @@ int aesd_release(struct inode *inode, struct file *filp)
     /**
      * TODO: handle release
      */
+    filp->private_data = NULL;
     return 0;
 }
 
@@ -52,6 +54,30 @@ ssize_t aesd_read(struct file *filp, char __user *buf, size_t count,
     /**
      * TODO: handle read
      */
+    struct aesd_dev *data = (struct aesd_dev *)filp->private_data;
+    if(data == NULL) {
+        return retval;
+    }
+    read_lock(&data->lock);
+    size_t entry_offset = 0;
+    struct aesd_buffer_entry *entry = aesd_circular_buffer_find_entry_offset_for_fpos(&data->cbuffer, *f_pos+data->seek_index, &entry_offset);
+    
+    if(entry) {
+        retval = entry->size - entry_offset;
+        if(retval > count) {
+            retval = count;
+        }
+        
+        int res = copy_to_user(buf, &entry->buffptr[entry_offset], retval);
+        if(res != 0) {
+            retval-=res;
+        }
+        data->seek_index+=retval;
+    }
+    else {
+        data->seek_index = 0;
+    }
+    read_unlock(&data->lock);
     return retval;
 }
 
@@ -63,6 +89,55 @@ ssize_t aesd_write(struct file *filp, const char __user *buf, size_t count,
     /**
      * TODO: handle write
      */
+    struct aesd_buffer_entry *data;
+    char* ptr;
+    int res = 0;
+
+    struct aesd_dev* pack = (struct aesd_dev *)filp->private_data;
+    if(pack == NULL) {
+        return retval;
+    }
+    write_lock(&pack->lock);
+    if(pack->working_index != pack->cbuffer.in_offs) {
+        data = &pack->cbuffer.entry[pack->working_index];
+        ptr = kmalloc(sizeof(char)*(data->size+count), GFP_KERNEL);
+        if(ptr == NULL) {
+            write_unlock(&pack->lock);
+            return retval;
+        }
+        memcpy(ptr, data->buffptr, data->size);
+        kfree(data->buffptr);
+        data->buffptr = ptr;
+        ptr+=data->size;
+        res = copy_from_user(ptr, buf, count);
+        data->size+=(count-res);
+        
+    } else {
+        data = kmalloc(sizeof(struct aesd_buffer_entry), GFP_KERNEL);
+        if(data == NULL) {
+            write_unlock(&pack->lock);
+            return retval;
+        }
+        data->buffptr = kmalloc(count, GFP_KERNEL);
+        if(data->buffptr == NULL) {
+            kfree(data);
+            write_unlock(&pack->lock);
+            return retval;
+        }
+        ptr = data->buffptr;
+        res = copy_from_user(ptr, buf, count);
+        data->size = count - res;
+
+        struct aesd_buffer_entry *tmp = aesd_circular_buffer_add_entry(&pack->cbuffer, data);
+        if(tmp) {
+            kfree(tmp);
+        }
+    }
+    if(data->buffptr[data->size-1] == '\n') {
+        pack->working_index = pack->cbuffer.in_offs;
+    }
+    retval = count - res;
+    write_unlock(&pack->lock);
     return retval;
 }
 struct file_operations aesd_fops = {
@@ -105,6 +180,7 @@ int aesd_init_module(void)
     /**
      * TODO: initialize the AESD specific portion of the device
      */
+    rwlock_init(&aesd_device.lock);
 
     result = aesd_setup_cdev(&aesd_device);
 
@@ -124,6 +200,14 @@ void aesd_cleanup_module(void)
     /**
      * TODO: cleanup AESD specific poritions here as necessary
      */
+    int index;
+    struct aesd_buffer_entry *cur;
+    AESD_CIRCULAR_BUFFER_FOREACH(cur, &aesd_device.cbuffer, index) {
+        if(cur->buffptr) {
+            kfree(cur->buffptr);
+            cur->buffptr = NULL;
+        }
+    }
 
     unregister_chrdev_region(devno, 1);
 }
