@@ -16,7 +16,8 @@
 #include <sys/queue.h>
 #include <time.h>
 
-#define OUTPUT_FILE        "/var/tmp/aesdsocketdata"
+//#define OUTPUT_FILE        "/var/tmp/aesdsocketdata"
+#define OUTPUT_FILE        "/dev/aesdchar"
 #define PORT               "9000"
 #define BACKLOG            10
 #define BUF_SIZE           1024
@@ -234,14 +235,14 @@ int main(int argc, char* argv[])
     pthread_mutex_t mutex;
     pthread_mutex_init(&mutex, NULL);
 
-    struct timestamp_data time_data;
-    time_data.mutex = &mutex;
-    pthread_t timestamp_thread;
-    ret = pthread_create(&timestamp_thread, NULL, timestamp_handler, &time_data);
-    if(ret != 0) {
-        printf("error pthread_create for timestamp\n");
-        goto err3;
-    }
+    //struct timestamp_data time_data;
+    //time_data.mutex = &mutex;
+    //pthread_t timestamp_thread;
+    //ret = pthread_create(&timestamp_thread, NULL, timestamp_handler, &time_data);
+    //if(ret != 0) {
+    //    printf("error pthread_create for timestamp\n");
+    //    goto err3;
+    //}
 
     struct thread_node *cur, *next;
     while(!caught_signal) {
@@ -293,8 +294,8 @@ int main(int argc, char* argv[])
         free(cur);
     }
 
-    pthread_cancel(timestamp_thread);
-    pthread_join(timestamp_thread, NULL);
+    //pthread_cancel(timestamp_thread);
+    //pthread_join(timestamp_thread, NULL);
     
     pthread_mutex_destroy(&mutex);
     close(sd);
@@ -303,8 +304,8 @@ int main(int argc, char* argv[])
 
     return 0;
 
-err3:
-    pthread_mutex_destroy(&mutex);
+//err3:
+//    pthread_mutex_destroy(&mutex);
 err2:
     close(sd);
 err1:
