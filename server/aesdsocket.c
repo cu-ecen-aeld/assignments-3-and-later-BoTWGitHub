@@ -16,8 +16,14 @@
 #include <sys/queue.h>
 #include <time.h>
 
-//#define OUTPUT_FILE        "/var/tmp/aesdsocketdata"
+#define USE_AESD_CHAR_DEVICE 1
+
+#if (USE_AESD_CHAR_DEVICE == 1)
 #define OUTPUT_FILE        "/dev/aesdchar"
+#else
+#define OUTPUT_FILE        "/var/tmp/aesdsocketdata"
+#endif
+
 #define PORT               "9000"
 #define BACKLOG            10
 #define BUF_SIZE           1024
@@ -234,15 +240,16 @@ int main(int argc, char* argv[])
     LIST_INIT(&list_head);
     pthread_mutex_t mutex;
     pthread_mutex_init(&mutex, NULL);
-
-    //struct timestamp_data time_data;
-    //time_data.mutex = &mutex;
-    //pthread_t timestamp_thread;
-    //ret = pthread_create(&timestamp_thread, NULL, timestamp_handler, &time_data);
-    //if(ret != 0) {
-    //    printf("error pthread_create for timestamp\n");
-    //    goto err3;
-    //}
+#if (USE_AESD_CHAR_DEVICE == 0)
+    struct timestamp_data time_data;
+    time_data.mutex = &mutex;
+    pthread_t timestamp_thread;
+    ret = pthread_create(&timestamp_thread, NULL, timestamp_handler, &time_data);
+    if(ret != 0) {
+        printf("error pthread_create for timestamp\n");
+        goto err3;
+    }
+#endif
 
     struct thread_node *cur, *next;
     while(!caught_signal) {
@@ -304,8 +311,10 @@ int main(int argc, char* argv[])
 
     return 0;
 
-//err3:
-//    pthread_mutex_destroy(&mutex);
+#if (USE_AESD_CHAR_DEVICE == 0)
+err3:
+    pthread_mutex_destroy(&mutex);
+#endif
 err2:
     close(sd);
 err1:
