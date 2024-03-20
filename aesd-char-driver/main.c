@@ -39,9 +39,7 @@ int aesd_open(struct inode *inode, struct file *filp)
 int aesd_release(struct inode *inode, struct file *filp)
 {
     PDEBUG("release");
-    /**
-     * TODO: handle release
-     */
+    
     filp->private_data = NULL;
     return 0;
 }
@@ -50,17 +48,19 @@ ssize_t aesd_read(struct file *filp, char __user *buf, size_t count,
                 loff_t *f_pos)
 {
     ssize_t retval = 0;
+    struct aesd_dev *data;
+    size_t entry_offset = 0;
+    struct aesd_buffer_entry *entry;
+    int res;
     PDEBUG("read %zu bytes with offset %lld",count,*f_pos);
-    /**
-     * TODO: handle read
-     */
-    struct aesd_dev *data = (struct aesd_dev *)filp->private_data;
+
+    data = (struct aesd_dev *)filp->private_data;
     if(data == NULL) {
         return retval;
     }
     read_lock(&data->lock);
-    size_t entry_offset = 0;
-    struct aesd_buffer_entry *entry = aesd_circular_buffer_find_entry_offset_for_fpos(&data->cbuffer, *f_pos+data->seek_index, &entry_offset);
+    
+    entry = aesd_circular_buffer_find_entry_offset_for_fpos(&data->cbuffer, *f_pos+data->seek_index, &entry_offset);
     
     if(entry) {
         retval = entry->size - entry_offset;
@@ -68,7 +68,7 @@ ssize_t aesd_read(struct file *filp, char __user *buf, size_t count,
             retval = count;
         }
         
-        int res = copy_to_user(buf, &entry->buffptr[entry_offset], retval);
+        res = copy_to_user(buf, &entry->buffptr[entry_offset], retval);
         if(res != 0) {
             retval-=res;
         }
@@ -85,15 +85,14 @@ ssize_t aesd_write(struct file *filp, const char __user *buf, size_t count,
                 loff_t *f_pos)
 {
     ssize_t retval = -ENOMEM;
-    PDEBUG("write %zu bytes with offset %lld",count,*f_pos);
-    /**
-     * TODO: handle write
-     */
     struct aesd_buffer_entry *data;
     char* ptr;
     int res = 0;
+    struct aesd_dev *pack;
+    struct aesd_buffer_entry *tmp;
+    PDEBUG("write %zu bytes with offset %lld",count,*f_pos);
 
-    struct aesd_dev* pack = (struct aesd_dev *)filp->private_data;
+    pack = (struct aesd_dev *)filp->private_data;
     if(pack == NULL) {
         return retval;
     }
@@ -124,11 +123,11 @@ ssize_t aesd_write(struct file *filp, const char __user *buf, size_t count,
             write_unlock(&pack->lock);
             return retval;
         }
-        ptr = data->buffptr;
+        ptr = (char*)data->buffptr;
         res = copy_from_user(ptr, buf, count);
         data->size = count - res;
 
-        struct aesd_buffer_entry *tmp = aesd_circular_buffer_add_entry(&pack->cbuffer, data);
+        tmp = aesd_circular_buffer_add_entry(&pack->cbuffer, data);
         if(tmp) {
             kfree(tmp);
         }
@@ -168,6 +167,7 @@ int aesd_init_module(void)
 {
     dev_t dev = 0;
     int result;
+    printk(KERN_WARNING "Hello from aesdchar bolintw\n");
     result = alloc_chrdev_region(&dev, aesd_minor, 1,
             "aesdchar");
     aesd_major = MAJOR(dev);
@@ -177,9 +177,6 @@ int aesd_init_module(void)
     }
     memset(&aesd_device,0,sizeof(struct aesd_dev));
 
-    /**
-     * TODO: initialize the AESD specific portion of the device
-     */
     rwlock_init(&aesd_device.lock);
 
     result = aesd_setup_cdev(&aesd_device);
@@ -194,14 +191,12 @@ int aesd_init_module(void)
 void aesd_cleanup_module(void)
 {
     dev_t devno = MKDEV(aesd_major, aesd_minor);
-
-    cdev_del(&aesd_device.cdev);
-
-    /**
-     * TODO: cleanup AESD specific poritions here as necessary
-     */
     int index;
     struct aesd_buffer_entry *cur;
+    printk(KERN_WARNING "Goodbye from aesdchar bolintw\n");
+
+    cdev_del(&aesd_device.cdev);
+    
     AESD_CIRCULAR_BUFFER_FOREACH(cur, &aesd_device.cbuffer, index) {
         if(cur->buffptr) {
             kfree(cur->buffptr);
