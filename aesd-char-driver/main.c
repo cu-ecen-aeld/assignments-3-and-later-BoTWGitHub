@@ -29,9 +29,10 @@ struct aesd_dev aesd_device;
 
 int aesd_open(struct inode *inode, struct file *filp)
 {
+    struct aesd_dev* dev = container_of(inode->i_cdev, struct aesd_dev, cdev);
+    filp->private_data = (void *)dev;
+
     PDEBUG("open");
-    
-    filp->private_data = (void *)&aesd_device;
 
     return 0;
 }
@@ -40,7 +41,6 @@ int aesd_release(struct inode *inode, struct file *filp)
 {
     PDEBUG("release");
     
-    filp->private_data = NULL;
     return 0;
 }
 
@@ -56,9 +56,12 @@ ssize_t aesd_read(struct file *filp, char __user *buf, size_t count,
 
     data = (struct aesd_dev *)filp->private_data;
     if(data == NULL) {
-        return retval;
+        return -EFAULT;
     }
-    read_lock(&data->lock);
+    retval = mutex_lock_interruptible(&data->mu);
+    if (retval != 0) {
+        return -EINTR;
+    }
     
     entry = aesd_circular_buffer_find_entry_offset_for_fpos(&data->cbuffer, *f_pos+data->seek_index, &entry_offset);
     
@@ -77,7 +80,8 @@ ssize_t aesd_read(struct file *filp, char __user *buf, size_t count,
     else {
         data->seek_index = 0;
     }
-    read_unlock(&data->lock);
+
+    mutex_unlock(&data->mu);
     return retval;
 }
 
@@ -94,14 +98,19 @@ ssize_t aesd_write(struct file *filp, const char __user *buf, size_t count,
 
     pack = (struct aesd_dev *)filp->private_data;
     if(pack == NULL) {
-        return retval;
+        return -EFAULT;
     }
-    write_lock(&pack->lock);
+
+    retval = mutex_lock_interruptible(&pack->mu);
+    if (retval != 0) {
+        return -EINTR;
+    }
+
     if(pack->working_index != pack->cbuffer.in_offs) {
         data = &pack->cbuffer.entry[pack->working_index];
         ptr = kmalloc(sizeof(char)*(data->size+count), GFP_KERNEL);
         if(ptr == NULL) {
-            write_unlock(&pack->lock);
+            mutex_unlock(&pack->mu);
             return retval;
         }
         memcpy(ptr, data->buffptr, data->size);
@@ -114,13 +123,13 @@ ssize_t aesd_write(struct file *filp, const char __user *buf, size_t count,
     } else {
         data = kmalloc(sizeof(struct aesd_buffer_entry), GFP_KERNEL);
         if(data == NULL) {
-            write_unlock(&pack->lock);
+            mutex_unlock(&pack->mu);
             return retval;
         }
         data->buffptr = kmalloc(count, GFP_KERNEL);
         if(data->buffptr == NULL) {
             kfree(data);
-            write_unlock(&pack->lock);
+            mutex_unlock(&pack->mu);
             return retval;
         }
         ptr = (char*)data->buffptr;
@@ -136,7 +145,7 @@ ssize_t aesd_write(struct file *filp, const char __user *buf, size_t count,
         pack->working_index = pack->cbuffer.in_offs;
     }
     retval = count - res;
-    write_unlock(&pack->lock);
+    mutex_unlock(&pack->mu);
     return retval;
 }
 struct file_operations aesd_fops = {
@@ -177,11 +186,12 @@ int aesd_init_module(void)
     }
     memset(&aesd_device,0,sizeof(struct aesd_dev));
 
-    rwlock_init(&aesd_device.lock);
+    mutex_init(&aesd_device.mu);
 
     result = aesd_setup_cdev(&aesd_device);
 
     if( result ) {
+        mutex_destroy(&aesd_device.mu);
         unregister_chrdev_region(dev, 1);
     }
     return result;
@@ -203,6 +213,9 @@ void aesd_cleanup_module(void)
             cur->buffptr = NULL;
         }
     }
+
+    mutex_unlock(&aesd_device.mu);
+    mutex_destroy(&aesd_device.mu);
 
     unregister_chrdev_region(devno, 1);
 }

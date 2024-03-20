@@ -307,7 +307,9 @@ int main(int argc, char* argv[])
     pthread_mutex_destroy(&mutex);
     close(sd);
     closelog();
+#if (USE_AESD_CHAR_DEVICE == 0)
     remove(OUTPUT_FILE);
+#endif
 
     return 0;
 
@@ -319,7 +321,9 @@ err2:
     close(sd);
 err1:
     closelog();
+#if (USE_AESD_CHAR_DEVICE == 0)
     remove(OUTPUT_FILE);
+#endif
 
     return -1;
 }

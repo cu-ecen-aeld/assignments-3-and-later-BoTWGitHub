@@ -30,7 +30,7 @@ struct aesd_dev
     /**
      * TODO: Add structure(s) and locks needed to complete assignment requirements
      */
-    rwlock_t lock;
+    struct mutex mu;
     struct aesd_circular_buffer cbuffer;
     int working_index;
     int seek_index;
