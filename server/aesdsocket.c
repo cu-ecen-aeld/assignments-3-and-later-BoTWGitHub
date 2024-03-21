@@ -16,7 +16,7 @@
 #include <sys/queue.h>
 #include <time.h>
 
-#define USE_AESD_CHAR_DEVICE 1
+#define USE_AESD_CHAR_DEVICE 0
 
 #if (USE_AESD_CHAR_DEVICE == 1)
 #define OUTPUT_FILE        "/dev/aesdchar"
@@ -185,11 +185,11 @@ int main(int argc, char* argv[])
     }
 
     struct addrinfo hints;
-    struct addrinfo *servinfo;
+    struct addrinfo *servinfo = NULL;
 
     memset(&hints, 0, sizeof(struct addrinfo));
     hints.ai_flags = AI_PASSIVE;
-    hints.ai_family = AF_UNSPEC;
+    hints.ai_family = AF_INET;
     hints.ai_socktype = SOCK_STREAM;
 
     if(getaddrinfo(NULL, PORT, &hints, &servinfo) != 0) {
@@ -197,7 +197,7 @@ int main(int argc, char* argv[])
         goto err1;
     }
 
-    int sd = socket(PF_INET, SOCK_STREAM, 0);
+    int sd = socket(servinfo->ai_family, servinfo->ai_socktype, servinfo->ai_protocol);
     if(sd == -1) {
         syslog(LOG_ERR, "socket open failed");
         goto err1;
@@ -208,13 +208,12 @@ int main(int argc, char* argv[])
         goto err2;
     }
 
-    int ret = bind(sd, servinfo->ai_addr, sizeof(struct sockaddr));
-    freeaddrinfo(servinfo);
+    int ret = bind(sd, servinfo->ai_addr, servinfo->ai_addrlen);
     if(ret != 0) {
         syslog(LOG_ERR, "bind failed");
         goto err2;
     }
-    
+    freeaddrinfo(servinfo);
 
     pid_t pid;
     if(argc>1 && strcmp(argv[1], "d")) {
@@ -301,8 +300,10 @@ int main(int argc, char* argv[])
         free(cur);
     }
 
-    //pthread_cancel(timestamp_thread);
-    //pthread_join(timestamp_thread, NULL);
+#if (USE_AESD_CHAR_DEVICE == 0)
+    pthread_cancel(timestamp_thread);
+    pthread_join(timestamp_thread, NULL);
+#endif
     
     pthread_mutex_destroy(&mutex);
     close(sd);
@@ -320,6 +321,7 @@ err3:
 err2:
     close(sd);
 err1:
+    freeaddrinfo(servinfo);
     closelog();
 #if (USE_AESD_CHAR_DEVICE == 0)
     remove(OUTPUT_FILE);
