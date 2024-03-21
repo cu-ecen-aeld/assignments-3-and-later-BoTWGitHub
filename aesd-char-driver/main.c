@@ -70,6 +70,8 @@ ssize_t aesd_read(struct file *filp, char __user *buf, size_t count,
         if(retval <= 0) {
             mutex_unlock(&data->mu);
             return -EFAULT;
+        } else if (retval > count) {
+            retval = count;
         }
         
         res = copy_to_user(buf, &entry->buffptr[entry_offset], retval);
