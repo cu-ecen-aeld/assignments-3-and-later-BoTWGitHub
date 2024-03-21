@@ -47,17 +47,19 @@ int aesd_release(struct inode *inode, struct file *filp)
 ssize_t aesd_read(struct file *filp, char __user *buf, size_t count,
                 loff_t *f_pos)
 {
-    ssize_t retval = 0;
-    struct aesd_dev *data;
-    size_t entry_offset = 0;
-    struct aesd_buffer_entry *entry;
     unsigned long res;
+    size_t entry_offset = 0;
+    struct aesd_dev *data;
+    struct aesd_buffer_entry *entry;
+    ssize_t retval = 0;
+
     PDEBUG("read %zu bytes with offset %lld",count,*f_pos);
 
     data = (struct aesd_dev *)filp->private_data;
     if(data == NULL) {
         return -EFAULT;
     }
+
     retval = mutex_lock_interruptible(&data->mu);
     if (retval != 0) {
         return -EINTR;
@@ -90,11 +92,12 @@ ssize_t aesd_read(struct file *filp, char __user *buf, size_t count,
 ssize_t aesd_write(struct file *filp, const char __user *buf, size_t count,
                 loff_t *f_pos)
 {
-    ssize_t retval = -ENOMEM;
+    unsigned long res = 0;
     char* working_buf;
     struct aesd_dev *data;
     struct aesd_buffer_entry *working_entry;
-    int res = 0;
+    ssize_t retval = -ENOMEM;
+    
     PDEBUG("write %zu bytes with offset %lld",count,*f_pos);
 
     data = (struct aesd_dev *)filp->private_data;
@@ -112,7 +115,7 @@ ssize_t aesd_write(struct file *filp, const char __user *buf, size_t count,
         working_buf = kmalloc((working_entry->size + count), GFP_KERNEL);
         if(working_buf == NULL) {
             mutex_unlock(&data->mu);
-            return retval;
+            return ENOMEM;
         }
         memset(working_buf, '\0', (working_entry->size + count));
         memcpy(working_buf, working_entry->buffptr, working_entry->size);
@@ -125,13 +128,13 @@ ssize_t aesd_write(struct file *filp, const char __user *buf, size_t count,
         working_entry = kmalloc(sizeof(struct aesd_buffer_entry), GFP_KERNEL);
         if(working_entry == NULL) {
             mutex_unlock(&data->mu);
-            return retval;
+            return ENOMEM;
         }
         working_entry->buffptr = kmalloc(count, GFP_KERNEL);
         if(working_entry->buffptr == NULL) {
             kfree(data);
             mutex_unlock(&data->mu);
-            return retval;
+            return ENOMEM;
         }
         res = copy_from_user((char *)working_entry->buffptr, buf, count);
         working_entry->size = count - res;
@@ -141,11 +144,14 @@ ssize_t aesd_write(struct file *filp, const char __user *buf, size_t count,
             kfree(working_buf);
         }
     }
+
     if(working_entry->buffptr[working_entry->size-1] == '\n') {
         data->working_index = data->cbuffer.in_offs;
     }
+
     retval = count - res;
     mutex_unlock(&data->mu);
+
     return retval;
 }
 struct file_operations aesd_fops = {
