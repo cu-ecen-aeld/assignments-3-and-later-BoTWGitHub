@@ -74,7 +74,7 @@ ssize_t aesd_read(struct file *filp, char __user *buf, size_t count,
         
         res = copy_to_user(buf, &entry->buffptr[entry_offset], retval);
         retval -= res;
-        if(retval <=0) {
+        if(retval <= 0) {
             mutex_unlock(&data->mu);
             return -EFAULT;
         }
@@ -90,9 +90,9 @@ ssize_t aesd_write(struct file *filp, const char __user *buf, size_t count,
 {
     ssize_t retval = -ENOMEM;
     char* working_buf;
-    char* tmp;
     struct aesd_dev *data;
     struct aesd_buffer_entry *working_entry;
+    int res = 0;
     PDEBUG("write %zu bytes with offset %lld",count,*f_pos);
 
     data = (struct aesd_dev *)filp->private_data;
@@ -105,35 +105,44 @@ ssize_t aesd_write(struct file *filp, const char __user *buf, size_t count,
         return -EINTR;
     }
 
-    working_entry = &data->cbuffer.entry[data->working_index];
-
-    working_buf = kmalloc(working_entry->size+count, GFP_KERNEL);
-    if(working_buf == NULL) {
-        mutex_unlock(&data->mu);
-        return -ENOMEM;
-    }
-    memset(working_buf, '\0', working_entry->size+count);
-
-    if(working_entry->size > 0) {
-        memcpy(working_buf, working_entry->buffptr, working_entry->size);
-    }
-    retval = count - copy_from_user(working_buf + working_entry->size, buf, count);
-
-    tmp = working_entry->buffptr;
-    working_entry->buffptr = working_buf;
-    working_entry->size += retval;
-    if(tmp) {
-        kfree(tmp);
-    }
-
-    if(working_entry->buffptr[working_entry->size - 1] == '\n') {
-        tmp = aesd_circular_buffer_add_entry(&data->cbuffer, working_entry);
-        if(tmp) {
-            kfree(tmp);
+    if(data->working_index != data->cbuffer.in_offs) {
+        working_entry = &data->cbuffer.entry[data->working_index];
+        working_buf = kmalloc((working_entry->size + count), GFP_KERNEL);
+        if(working_buf == NULL) {
+            mutex_unlock(&data->mu);
+            return retval;
         }
+        memset(working_buf, '\0', (working_entry->size + count));
+        memcpy(working_buf, working_entry->buffptr, working_entry->size);
+        kfree((char *)working_entry->buffptr);
+        working_entry->buffptr = working_buf;
+        res = copy_from_user((working_buf + working_entry->size), buf, count);
+        working_entry->size += (count - res);
+
+    } else {
+        working_entry = kmalloc(sizeof(struct aesd_buffer_entry), GFP_KERNEL);
+        if(working_entry == NULL) {
+            mutex_unlock(&data->mu);
+            return retval;
+        }
+        working_entry->buffptr = kmalloc(count, GFP_KERNEL);
+        if(working_entry->buffptr == NULL) {
+            kfree(data);
+            mutex_unlock(&data->mu);
+            return retval;
+        }
+        res = copy_from_user((char *)working_entry->buffptr, buf, count);
+        working_entry->size = count - res;
+
+        working_buf = (char*)aesd_circular_buffer_add_entry(&data->cbuffer, working_entry);
+        if(working_buf) {
+            kfree(working_buf);
+        }
+    }
+    if(working_entry->buffptr[working_entry->size-1] == '\n') {
         data->working_index = data->cbuffer.in_offs;
     }
-
+    retval = count - res;
     mutex_unlock(&data->mu);
     return retval;
 }
