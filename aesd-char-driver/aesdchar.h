@@ -33,7 +33,6 @@ struct aesd_dev
     struct mutex mu;
     struct aesd_circular_buffer cbuffer;
     int working_index;
-    int seek_index;
     struct cdev cdev;     /* Char device structure      */
 };
 

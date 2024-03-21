@@ -51,7 +51,7 @@ ssize_t aesd_read(struct file *filp, char __user *buf, size_t count,
     struct aesd_dev *data;
     size_t entry_offset = 0;
     struct aesd_buffer_entry *entry;
-    int res;
+    unsigned long res;
     PDEBUG("read %zu bytes with offset %lld",count,*f_pos);
 
     data = (struct aesd_dev *)filp->private_data;
@@ -63,22 +63,22 @@ ssize_t aesd_read(struct file *filp, char __user *buf, size_t count,
         return -EINTR;
     }
     
-    entry = aesd_circular_buffer_find_entry_offset_for_fpos(&data->cbuffer, *f_pos+data->seek_index, &entry_offset);
+    entry = aesd_circular_buffer_find_entry_offset_for_fpos(&data->cbuffer, *f_pos, &entry_offset);
     
     if(entry) {
         retval = entry->size - entry_offset;
-        if(retval > count) {
-            retval = count;
+        if(retval <= 0) {
+            mutex_unlock(&data->mu);
+            return -EFAULT;
         }
         
         res = copy_to_user(buf, &entry->buffptr[entry_offset], retval);
-        if(res != 0) {
-            retval-=res;
+        retval -= res;
+        if(retval <=0) {
+            mutex_unlock(&data->mu);
+            return -EFAULT;
         }
-        data->seek_index+=retval;
-    }
-    else {
-        data->seek_index = 0;
+        *f_pos += retval;
     }
 
     mutex_unlock(&data->mu);
@@ -89,63 +89,52 @@ ssize_t aesd_write(struct file *filp, const char __user *buf, size_t count,
                 loff_t *f_pos)
 {
     ssize_t retval = -ENOMEM;
-    struct aesd_buffer_entry *data;
-    char* ptr;
-    int res = 0;
-    struct aesd_dev *pack;
-    struct aesd_buffer_entry *tmp;
+    char* working_buf;
+    char* tmp;
+    struct aesd_dev *data;
+    struct aesd_buffer_entry *working_entry;
     PDEBUG("write %zu bytes with offset %lld",count,*f_pos);
 
-    pack = (struct aesd_dev *)filp->private_data;
-    if(pack == NULL) {
+    data = (struct aesd_dev *)filp->private_data;
+    if(data == NULL) {
         return -EFAULT;
     }
 
-    retval = mutex_lock_interruptible(&pack->mu);
+    retval = mutex_lock_interruptible(&data->mu);
     if (retval != 0) {
         return -EINTR;
     }
 
-    if(pack->working_index != pack->cbuffer.in_offs) {
-        data = &pack->cbuffer.entry[pack->working_index];
-        ptr = kmalloc(sizeof(char)*(data->size+count), GFP_KERNEL);
-        if(ptr == NULL) {
-            mutex_unlock(&pack->mu);
-            return retval;
-        }
-        memcpy(ptr, data->buffptr, data->size);
-        kfree(data->buffptr);
-        data->buffptr = ptr;
-        ptr+=data->size;
-        res = copy_from_user(ptr, buf, count);
-        data->size+=(count-res);
-        
-    } else {
-        data = kmalloc(sizeof(struct aesd_buffer_entry), GFP_KERNEL);
-        if(data == NULL) {
-            mutex_unlock(&pack->mu);
-            return retval;
-        }
-        data->buffptr = kmalloc(count, GFP_KERNEL);
-        if(data->buffptr == NULL) {
-            kfree(data);
-            mutex_unlock(&pack->mu);
-            return retval;
-        }
-        ptr = (char*)data->buffptr;
-        res = copy_from_user(ptr, buf, count);
-        data->size = count - res;
+    working_entry = &data->cbuffer.entry[data->working_index];
 
-        tmp = aesd_circular_buffer_add_entry(&pack->cbuffer, data);
+    working_buf = kmalloc(working_entry->size+count, GFP_KERNEL);
+    if(working_buf == NULL) {
+        mutex_unlock(&data->mu);
+        return -ENOMEM;
+    }
+    memset(working_buf, '\0', working_entry->size+count);
+
+    if(working_entry->size > 0) {
+        memcpy(working_buf, working_entry->buffptr, working_entry->size);
+    }
+    retval = count - copy_from_user(working_buf + working_entry->size, buf, count);
+
+    tmp = working_entry->buffptr;
+    working_entry->buffptr = working_buf;
+    working_entry->size += retval;
+    if(tmp) {
+        kfree(tmp);
+    }
+
+    if(working_entry->buffptr[working_entry->size - 1] == '\n') {
+        tmp = aesd_circular_buffer_add_entry(&data->cbuffer, working_entry);
         if(tmp) {
             kfree(tmp);
         }
+        data->working_index = data->cbuffer.in_offs;
     }
-    if(data->buffptr[data->size-1] == '\n') {
-        pack->working_index = pack->cbuffer.in_offs;
-    }
-    retval = count - res;
-    mutex_unlock(&pack->mu);
+
+    mutex_unlock(&data->mu);
     return retval;
 }
 struct file_operations aesd_fops = {
