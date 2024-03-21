@@ -16,7 +16,7 @@
 #include <sys/queue.h>
 #include <time.h>
 
-#define USE_AESD_CHAR_DEVICE 0
+#define USE_AESD_CHAR_DEVICE 1
 
 #if (USE_AESD_CHAR_DEVICE == 1)
 #define OUTPUT_FILE        "/dev/aesdchar"
