@@ -143,6 +143,8 @@ ssize_t aesd_write(struct file *filp, const char __user *buf, size_t count,
         if(working_buf) {
             kfree(working_buf);
         }
+        kfree(working_entry);
+        working_entry = &data->cbuffer.entry[data->working_index];
     }
 
     if(working_entry->buffptr[working_entry->size-1] == '\n') {
