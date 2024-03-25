@@ -19,6 +19,7 @@
 #include <linux/fs.h> // file_operations
 #include <linux/slab.h>
 #include "aesdchar.h"
+#include "aesd_ioctl.h"
 int aesd_major =   0; // use dynamic major
 int aesd_minor =   0;
 
@@ -156,10 +157,73 @@ ssize_t aesd_write(struct file *filp, const char __user *buf, size_t count,
 
     return retval;
 }
+
+static long aesd_move_the_pos(struct file *filp, struct aesd_seekto *seekto)
+{
+    int count = 0;
+    int cmd;
+    int tmp_out;
+    struct aesd_dev *data;
+
+    PDEBUG("aesd_move_the_pos: %d %d", seekto->write_cmd, seekto->write_cmd_offset);
+
+    data = (struct aesd_dev *)filp->private_data;
+    if(data == NULL) {
+        printk(KERN_ERR "data retrieve error");
+        return -EFAULT;
+    }
+    if(data->cbuffer.in_offs == data->cbuffer.out_offs && !data->cbuffer.full) {
+        printk(KERN_ERR "ring buffer empty");
+        return -EINVAL;
+    }
+
+    tmp_out = data->cbuffer.out_offs;
+    for(cmd = 0; cmd < seekto->write_cmd; cmd++) {
+        count += data->cbuffer.entry[tmp_out].size;
+        tmp_out = (tmp_out+1)%AESDCHAR_MAX_WRITE_OPERATIONS_SUPPORTED;
+        if(tmp_out == data->cbuffer.in_offs) {
+            printk(KERN_ERR "not enough data 1");
+            return -EINVAL;
+        }
+    }
+    if(data->cbuffer.entry[tmp_out].size < seekto->write_cmd_offset) {
+        printk(KERN_ERR "not enough data 2");
+        return -EINVAL;
+    }
+    count += seekto->write_cmd_offset;
+    filp->f_pos = count;
+    return 0;
+}
+
+long aesd_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
+{
+	int retval = 0;
+    struct aesd_seekto seekto;
+
+	if (_IOC_TYPE(cmd) != AESD_IOC_MAGIC) return -ENOTTY;
+	if (_IOC_NR(cmd) > AESDCHAR_IOC_MAXNR) return -ENOTTY;
+
+    switch(cmd) {
+        case AESDCHAR_IOCSEEKTO:
+            if( copy_from_user(&seekto, (const void __user *)arg, sizeof(seekto)) != 0) {
+                printk(KERN_ERR "AESDCHAR_IOCSEEKTO: copy_from_user failed");
+                retval = EFAULT;
+            } else {
+                retval = aesd_move_the_pos(filp, &seekto);
+            }
+            break;
+
+        default:
+            return -ENOTTY;
+    }
+    return retval;
+}
+
 struct file_operations aesd_fops = {
     .owner =    THIS_MODULE,
     .read =     aesd_read,
     .write =    aesd_write,
+    .unlocked_ioctl = aesd_ioctl,
     .open =     aesd_open,
     .release =  aesd_release,
 };
@@ -177,8 +241,6 @@ static int aesd_setup_cdev(struct aesd_dev *dev)
     }
     return err;
 }
-
-
 
 int aesd_init_module(void)
 {

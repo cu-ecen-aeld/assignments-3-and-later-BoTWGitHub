@@ -16,10 +16,14 @@
 #include <sys/queue.h>
 #include <time.h>
 
+
 #define USE_AESD_CHAR_DEVICE 1
 
 #if (USE_AESD_CHAR_DEVICE == 1)
+#include <sys/ioctl.h>
 #define OUTPUT_FILE        "/dev/aesdchar"
+#define AESD_IOC_MAGIC 0x16
+#define AESDCHAR_IOCSEEKTO _IOWR(AESD_IOC_MAGIC, 1, struct aesd_seekto)
 #else
 #define OUTPUT_FILE        "/var/tmp/aesdsocketdata"
 #endif
@@ -43,6 +47,17 @@ struct thread_node {
     pthread_t thread;
     struct thread_data *data;
     LIST_ENTRY(thread_node) node;
+};
+
+struct aesd_seekto {
+    /**
+     * The zero referenced write command to seek into
+     */
+    uint32_t write_cmd;
+    /**
+     * The zero referenced offset within the write
+     */
+    uint32_t write_cmd_offset;
 };
 
 LIST_HEAD(listhead, thread_node) head;
@@ -91,17 +106,28 @@ void* data_handler(void* thread_param)
         return thread_param;
     }
     int ret_len;
+    struct aesd_seekto seekto;
+    bool found = false;
     while((ret_len = recv(data->sockfd, buf, BUF_SIZE, 0)) > 0) {
-        int len = write(wd, buf, ret_len);
-        if(len == -1) {
-            syslog(LOG_ERR, "write file failed");
-            close(wd);
-            data->complete = true;
-            return thread_param;
-        }
-        if(buf[ret_len-1]=='\n') {
+#if (USE_AESD_CHAR_DEVICE == 1)
+        if(sscanf(buf, "AESDCHAR_IOCSEEKTO:%d,%d", &seekto.write_cmd, &seekto.write_cmd_offset) == 2) {
+            found = true;
             break;
+        } else {
+#endif
+            int len = write(wd, buf, ret_len);
+            if(len == -1) {
+                syslog(LOG_ERR, "write file failed");
+                close(wd);
+                data->complete = true;
+                return thread_param;
+            }
+            if(buf[ret_len-1]=='\n') {
+                break;
+            }
+#if (USE_AESD_CHAR_DEVICE == 1)
         }
+#endif
     }
     close(wd);
 
@@ -111,6 +137,12 @@ void* data_handler(void* thread_param)
         data->complete = true;
         return thread_param;
     }
+
+#if (USE_AESD_CHAR_DEVICE == 1)
+    if(found) {
+        ioctl(rd, AESDCHAR_IOCSEEKTO, &seekto);
+    }
+#endif
 
     while((ret_len = read(rd, buf, BUF_SIZE)) > 0){
         send(data->sockfd, buf, ret_len, 0);
